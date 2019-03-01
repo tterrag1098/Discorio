@@ -14,6 +14,7 @@ import com.tterrag.discorio.ChatReader.FactorioMessage;
 import discord4j.core.DiscordClient;
 import discord4j.core.DiscordClientBuilder;
 import discord4j.core.event.domain.message.MessageCreateEvent;
+import discord4j.core.object.entity.Channel;
 import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.TextChannel;
 import discord4j.core.object.util.Snowflake;
@@ -58,6 +59,7 @@ public class Discorio {
                 .log()
                 .filter(e -> e.getMessage().getAuthor().map(u -> !u.isBot()).orElse(true))
                 .filter(e -> e.getMessage().getContent().isPresent())
+                .filterWhen(e -> e.getMessage().getChannel().map(Channel::getId).map(s -> s.asLong() == 205168854240985088L))
                 .flatMap(Discorio::sendToFactorio)
                 .doOnError(t -> log.error("Error sending factorio message: ", t));
 
@@ -65,11 +67,12 @@ public class Discorio {
 
         ChatReader reader = new ChatReader(args.fileName);
         
+        @SuppressWarnings("null") 
         Flux<Message> chatListener = reader.start()
-                .onErrorResume(t -> Mono.just(new FactorioMessage("ERROR", t.toString())))
+                .onErrorResume(t -> Mono.just(new FactorioMessage("ERROR", t.toString(), false)))
                                                             // TODO take channel as command/arg
                 .transform(flatZipWith(client.getChannelById(Snowflake.of(205168854240985088L)).cast(TextChannel.class).cache().repeat(), 
-                         (m, c) -> c.createMessage("<" + m.getUsername() + "> " + m.getMessage())))
+                         (m, c) -> c.createMessage(m.isAction() ? ("*" + m.getUsername() + " " + m.getMessage() + "*") : "<" + m.getUsername() + "> " + m.getMessage())))
                 .doOnError(t -> log.error("Error sending discord message: ", t));
         
         log.info("Chat reader created");

@@ -21,15 +21,24 @@ public class ChatReader {
         
         String username;
         String message;
+        boolean action;
     }
     
+    private static final String TIMESTAMP_REGEX = "(?<date>\\d{4}-\\d{2}-\\d{2})\\s(?<time>\\d{2}:\\d{2}:\\d{2})";
+    
     private static final Pattern CHAT_MSG = Pattern.compile(
-              "(?<date>\\d{4}-\\d{2}-\\d{2})\\s"
-            + "(?<time>\\d{2}:\\d{2}:\\d{2})\\s"
+            TIMESTAMP_REGEX + "\\s"
             + "\\[(?<type>CHAT|SHOUT)\\]\\s"
             + "(?!<server>)(?<user>\\S+)\\s*"
             + "(?:\\[(?<team>[^\\]]+)\\])?\\s*"
             + "(?:\\(shout\\))?:\\s*"
+            + "(?<message>.+)$"
+    );
+    
+    private static final Pattern JOIN_LEAVE_MSG = Pattern.compile(    
+            TIMESTAMP_REGEX + "\\s"
+            + "\\[(?<type>JOIN|LEAVE)\\]\\s"
+            + "(?<user>\\S+)\\s"
             + "(?<message>.+)$"
     );
 
@@ -45,15 +54,18 @@ public class ChatReader {
         Tailer tailer = new Tailer(new File(fileName), new TailerListenerAdapter() {
             @Override
             public void handle(String line) {
-                Matcher m = CHAT_MSG.matcher(line.trim());
-                log.info("Saw input");
+                line = line.trim();
+                Matcher m = CHAT_MSG.matcher(line);
                 if (m.matches()) {
                     String type = m.group("type");
-                    log.info("Input matched, type: {}", type);
                     if (type.equals("SHOUT") || m.group("team") == null) {
-                        log.info("Visible chat, sending to discord...");
-                        sink.next(new FactorioMessage(m.group("user"), m.group("message")));
+                        sink.next(new FactorioMessage(m.group("user"), m.group("message"), false));
                     }
+                    return;
+                }
+                m = JOIN_LEAVE_MSG.matcher(line);
+                if (m.matches()) {
+                    sink.next(new FactorioMessage(m.group("user"), m.group("message"), true));
                 }
             }
           
