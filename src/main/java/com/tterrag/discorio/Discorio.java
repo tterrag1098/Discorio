@@ -15,7 +15,6 @@ import discord4j.core.DiscordClient;
 import discord4j.core.DiscordClientBuilder;
 import discord4j.core.event.domain.message.MessageCreateEvent;
 import discord4j.core.object.entity.Channel;
-import discord4j.core.object.entity.Message;
 import discord4j.core.object.entity.TextChannel;
 import discord4j.core.object.util.Snowflake;
 import lombok.ToString;
@@ -52,36 +51,31 @@ public class Discorio {
         Hooks.onOperatorDebug();
 
         DiscordClient client = new DiscordClientBuilder(args.authKey).build();
-        
-        log.info("Client built");
-        
-        Flux<?> messageListener = client.getEventDispatcher().on(MessageCreateEvent.class)
+                
+        Mono<Void> messageListener = client.getEventDispatcher().on(MessageCreateEvent.class)
                 .log()
                 .filter(e -> e.getMessage().getAuthor().map(u -> !u.isBot()).orElse(true))
                 .filter(e -> e.getMessage().getContent().isPresent())
                 .filterWhen(e -> e.getMessage().getChannel().map(Channel::getId).map(s -> s.asLong() == 205168854240985088L))
                 .flatMap(Discorio::sendToFactorio)
-                .doOnError(t -> log.error("Error sending factorio message: ", t));
-
-        log.info("Message listener created");
+                .doOnError(t -> log.error("Error sending factorio message: ", t))
+                .onErrorResume(t -> Mono.empty())
+                .then();
 
         ChatReader reader = new ChatReader(args.fileName);
         
         @SuppressWarnings("null") 
-        Flux<Message> chatListener = reader.start()
+        Mono<Void> chatListener = reader.start()
                 .onErrorResume(t -> Mono.just(new FactorioMessage("ERROR", t.toString(), false)))
                                                             // TODO take channel as command/arg
                 .transform(flatZipWith(client.getChannelById(Snowflake.of(205168854240985088L)).cast(TextChannel.class).cache().repeat(), 
                          (m, c) -> c.createMessage(m.isAction() ? ("*" + m.getUsername() + " " + m.getMessage() + "*") : "<" + m.getUsername() + "> " + m.getMessage())))
-                .doOnError(t -> log.error("Error sending discord message: ", t));
+                .doOnError(t -> log.error("Error sending discord message: ", t))
+                .onErrorResume(t -> Mono.empty())
+                .subscribeOn(Schedulers.elastic(), false)
+                .then();
         
-        log.info("Chat reader created");
-        
-        messageListener.subscribe();
-        log.info("Message listener subscribed");
-        chatListener.subscribeOn(Schedulers.elastic(), false).subscribe();
-        log.info("Chat reader subscribed");
-        client.login().block();
+        Mono.zip(client.login(),  messageListener, chatListener).block();
     }
 
     private static Mono<?> sendToFactorio(MessageCreateEvent evt) {
@@ -93,6 +87,7 @@ public class Discorio {
         });
     }
     
+    @SuppressWarnings("null")
     public static <A, B, C> Function<Flux<A>, Flux<C>> flatZipWith(Flux<? extends B> b, BiFunction<A, B, Publisher<C>> combinator) {
         return in -> in.zipWith(b, combinator).flatMap(Function.identity());
     }

@@ -43,6 +43,8 @@ public class ChatReader {
     );
 
     private final String fileName;
+    
+    private Thread thread;
         
     public ChatReader(String fileName) {
         this.fileName = fileName;
@@ -51,7 +53,7 @@ public class ChatReader {
     public Flux<FactorioMessage> start() {
         EmitterProcessor<FactorioMessage> processor = EmitterProcessor.create(false);
         FluxSink<FactorioMessage> sink = processor.sink();
-        Tailer tailer = new Tailer(new File(fileName), new TailerListenerAdapter() {
+        restart(new TailerListenerAdapter() {
             @Override
             public void handle(String line) {
                 line = line.trim();
@@ -72,13 +74,22 @@ public class ChatReader {
             @Override
             public void handle(Exception ex) {
                 sink.error(ex);
+                restart(this);
             }
-        }, 1000, true);
-        
-        Thread t = new Thread(tailer, "Factorio chat reader");
-        t.setDaemon(true);
-        t.start();
+        });
         
         return processor;
+    }
+
+    protected void restart(TailerListenerAdapter adapter) {
+        if (thread != null) {
+            if (thread.isAlive()) { 
+                thread.interrupt();
+            }
+        }
+        Tailer tailer = new Tailer(new File(fileName), adapter, 1000, true);
+        thread = new Thread(tailer, "Factorio chat reader");
+        thread.setDaemon(true);
+        thread.start();
     }
 }
