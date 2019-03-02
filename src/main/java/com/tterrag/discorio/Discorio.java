@@ -58,8 +58,6 @@ public class Discorio {
                 .filter(e -> e.getMessage().getContent().isPresent())
                 .filterWhen(e -> e.getMessage().getChannel().map(Channel::getId).map(s -> s.asLong() == 205168854240985088L))
                 .flatMap(Discorio::sendToFactorio)
-                .doOnError(t -> log.error("Error sending factorio message: ", t))
-                .onErrorResume(t -> Mono.empty())
                 .then();
 
         ChatReader reader = new ChatReader(args.fileName);
@@ -70,23 +68,21 @@ public class Discorio {
                                                             // TODO take channel as command/arg
                 .transform(flatZipWith(client.getChannelById(Snowflake.of(205168854240985088L)).cast(TextChannel.class).cache().repeat(), 
                          (m, c) -> c.createMessage(m.isAction() ? ("*" + m.getUsername() + " " + m.getMessage() + "*") : "<" + m.getUsername() + "> " + m.getMessage())))
-                .doOnError(t -> log.error("Error sending discord message: ", t))
-                .onErrorResume(t -> Mono.empty())
                 .subscribeOn(Schedulers.elastic(), false)
                 .then();
         
         Mono.zip(client.login(),  messageListener, chatListener).block();
     }
 
-    private static Mono<?> sendToFactorio(MessageCreateEvent evt) {
+    private static Mono<Void> sendToFactorio(MessageCreateEvent evt) {
         return Mono.fromCallable(() -> {
             try (BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(args.outputFile))) {
                 out.write(("<" + evt.getMember().get().getUsername() + "> " + evt.getMessage().getContent().get() + "\n").getBytes());
             }
             return true;
-        });
+        }).then().onErrorResume(t -> evt.getMessage().getChannel().flatMap(c -> c.createMessage("Error sending to factorio: " + t)).then());
     }
-    
+
     @SuppressWarnings("null")
     public static <A, B, C> Function<Flux<A>, Flux<C>> flatZipWith(Flux<? extends B> b, BiFunction<A, B, Publisher<C>> combinator) {
         return in -> in.zipWith(b, combinator).flatMap(Function.identity());

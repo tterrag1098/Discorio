@@ -1,6 +1,8 @@
 package com.tterrag.discorio;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -8,12 +10,10 @@ import org.apache.commons.io.input.Tailer;
 import org.apache.commons.io.input.TailerListenerAdapter;
 
 import lombok.Value;
-import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
-@Slf4j
 public class ChatReader {
     
     @Value
@@ -53,7 +53,7 @@ public class ChatReader {
     public Flux<FactorioMessage> start() {
         EmitterProcessor<FactorioMessage> processor = EmitterProcessor.create(false);
         FluxSink<FactorioMessage> sink = processor.sink();
-        restart(new TailerListenerAdapter() {
+        Tailer tailer = new Tailer(new File(fileName), new TailerListenerAdapter() {
             @Override
             public void handle(String line) {
                 line = line.trim();
@@ -73,23 +73,22 @@ public class ChatReader {
           
             @Override
             public void handle(Exception ex) {
-                sink.error(ex);
-                restart(this);
+                sink.next(new FactorioMessage("ERROR", ex.toString(), false));
             }
-        });
+            
+            @Override
+            public void fileNotFound() {
+                sink.error(new FileNotFoundException(fileName));
+            }
+        }, 1000, true);
         
-        return processor;
-    }
-
-    protected void restart(TailerListenerAdapter adapter) {
-        if (thread != null) {
-            if (thread.isAlive()) { 
-                thread.interrupt();
-            }
-        }
-        Tailer tailer = new Tailer(new File(fileName), adapter, 1000, true);
-        thread = new Thread(tailer, "Factorio chat reader");
+        thread = new Thread(() -> {
+            tailer.run();
+            sink.error(new IOException("Tailer completed"));
+        }, "Factorio chat reader");
         thread.setDaemon(true);
         thread.start();
+        
+        return processor;
     }
 }
