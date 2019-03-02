@@ -64,12 +64,14 @@ public class Discorio {
         
         @SuppressWarnings("null") 
         Mono<Void> chatListener = reader.start()
-                .onErrorResume(t -> Mono.just(new FactorioMessage("ERROR", t.toString(), false)))
+                .onErrorResume(t -> Mono.just(new FactorioMessage("ERROR", t.toString(), false)).then(Mono.error(t)))
                                                             // TODO take channel as command/arg
                 .transform(flatZipWith(client.getChannelById(Snowflake.of(205168854240985088L)).cast(TextChannel.class).cache().repeat(), 
                          (m, c) -> c.createMessage(m.isAction() ? ("*" + m.getUsername() + " " + m.getMessage() + "*") : "<" + m.getUsername() + "> " + m.getMessage())))
                 .subscribeOn(Schedulers.elastic(), false)
                 .then();
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> client.logout().block()));
         
         Mono.zip(client.login(),  messageListener, chatListener).block();
     }
